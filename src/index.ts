@@ -7,6 +7,7 @@
 
 interface Env {
   CACHE: KVNamespace;
+  AI: Ai;
   FB_PAGE_ID: string;
   FB_APP_ID: string;
   FB_PAGE_TOKEN: string;
@@ -192,137 +193,148 @@ async function getAnimals(request: Request, env: Env): Promise<Response> {
   }
 }
 
-// ─── Messenger Bot ──────────────────────────────────────────────
+// ─── Messenger Bot (AI-Powered) ─────────────────────────────────
 const SANCTUARY_INFO = {
   name: "The Barking Lot",
+  owner: "Jhettlyn",
   address: "401 Young St, Big Spring, TX 79720",
-  phone: "(432) 232-9884",
-  email: "info@barkinglot.org",
-  adoptEmail: "adopt@barkinglot.org",
-  hours: "Tuesday-Sunday 10 AM - 6 PM, Monday Closed",
+  phone: "(432) 305-8495",
+  email: "thetexasbarkinglot@gmail.com",
+  hours: "Always Open — call or message ahead for visits",
   website: "https://barkinglot.org",
   venmo: "https://www.venmo.com/u/TheTexasBarkingLot",
   cashapp: "https://cash.app/$TEXASBARKINGLOT",
   applicationUrl: "https://www.jotform.com/assign/242957434131153/242978620418060",
   ein: "39-2743613",
   about: "Non-Profit 501(c)(3) Animal Sanctuary in Big Spring, Texas. We rescue, rehabilitate, and rehome animals in need.",
+  adoptionFee: "$100 (currently half off!)",
+  groomingNote: "We offer grooming services! Call or text Jhettlyn at (480) 843-4452 to schedule.",
+  boardingNote: "We offer boarding for dogs. Contact us to arrange drop-off/pickup.",
+  suppliesNeeded: "Dog food, puppy food, kitten formula, cat food, blankets, towels, cleaning supplies, mesh tarps, dog houses, flea/tick prevention",
+  animalControl: "(432) 264-2372",
 };
 
-function generateBotResponse(text: string): { text?: string; quickReplies?: string[] } {
-  const lower = text.toLowerCase().trim();
+const AI_SYSTEM_PROMPT = `You are the friendly AI assistant for The Barking Lot Animal Sanctuary in Big Spring, Texas. You respond on Facebook Messenger.
 
-  // Greetings
-  if (/^(hi|hello|hey|howdy|good\s*(morning|afternoon|evening))/.test(lower)) {
-    return {
-      text: `Hey there! 🐾 Welcome to The Barking Lot Animal Sanctuary! We're a 501(c)(3) nonprofit in Big Spring, TX dedicated to rescuing and rehoming animals in need.\n\nHow can I help you today?`,
-      quickReplies: ["Available Animals", "How to Adopt", "Donate", "Volunteer", "Hours & Location"],
-    };
-  }
+PERSONALITY: Warm, casual, small-town Texas friendly. Use a conversational tone like a friend — not corporate. Keep responses SHORT (2-4 sentences max unless giving detailed info). Use emojis sparingly and naturally.
 
-  // Adoption
-  if (/adopt|adoption|available|animals|pets|dogs|cats|puppies|kittens/.test(lower)) {
-    return {
-      text: `🐾 We'd love to help you find your perfect match!\n\nTo see our available animals, visit our website:\n${SANCTUARY_INFO.website}\n\nOr check our Facebook page for the latest arrivals and adoption posts.\n\nTo apply to adopt, fill out our application:\n${SANCTUARY_INFO.applicationUrl}\n\nYou can also email us at ${SANCTUARY_INFO.adoptEmail} or call ${SANCTUARY_INFO.phone} to ask about specific animals!`,
-      quickReplies: ["Application Link", "Hours & Location", "Fostering"],
-    };
-  }
+SANCTUARY INFO:
+- Name: ${SANCTUARY_INFO.name}
+- Owner/Operator: ${SANCTUARY_INFO.owner}
+- Address: ${SANCTUARY_INFO.address}
+- Phone: ${SANCTUARY_INFO.phone}
+- Email: ${SANCTUARY_INFO.email}
+- Website: ${SANCTUARY_INFO.website}
+- Hours: ${SANCTUARY_INFO.hours}
+- 501(c)(3) EIN: ${SANCTUARY_INFO.ein}
+- Adoption fee: ${SANCTUARY_INFO.adoptionFee}
+- Adoption/Foster application: ${SANCTUARY_INFO.applicationUrl}
+- Venmo: ${SANCTUARY_INFO.venmo}
+- CashApp: ${SANCTUARY_INFO.cashapp}
+- Grooming: ${SANCTUARY_INFO.groomingNote}
+- Boarding: ${SANCTUARY_INFO.boardingNote}
+- Big Spring Animal Control: ${SANCTUARY_INFO.animalControl}
 
-  // Foster
-  if (/foster/.test(lower)) {
-    return {
-      text: `💛 Fostering saves lives! When you foster, you give an animal a safe, loving temporary home while they wait for their forever family.\n\nWe provide all supplies (food, crate, medical care). You provide the love!\n\nTo apply to foster, fill out our application:\n${SANCTUARY_INFO.applicationUrl}\n\nOr email us at ${SANCTUARY_INFO.adoptEmail}`,
-      quickReplies: ["How to Adopt", "Donate", "Volunteer"],
-    };
-  }
+SUPPLIES CURRENTLY NEEDED: ${SANCTUARY_INFO.suppliesNeeded}
 
-  // Donate
-  if (/donat|give|help|support|contribute|money|fund/.test(lower)) {
-    return {
-      text: `💛 Thank you for wanting to help! Every dollar goes directly to saving animal lives.\n\n💸 Venmo: ${SANCTUARY_INFO.venmo}\n💸 CashApp: ${SANCTUARY_INFO.cashapp}\n\nWe also accept:\n• Dog/cat food donations\n• Blankets, towels, and bedding\n• Cleaning supplies\n• Building materials\n\nDrop-off at: ${SANCTUARY_INFO.address}\n\nWe're a 501(c)(3) — EIN: ${SANCTUARY_INFO.ein} — all donations are tax-deductible! 🧾`,
-      quickReplies: ["What You Need Most", "Hours & Location", "Volunteer"],
-    };
-  }
+RULES:
+1. NEVER make up information about specific animals, pricing, or availability. If unsure, say "Let me have Jhettlyn get back to you on that!" or suggest they call/text.
+2. For GROOMING appointments: Always direct them to call/text Jhettlyn at (480) 843-4452. You CANNOT schedule appointments.
+3. For SUPPLY DONATIONS (food, blankets, supplies): Thank them warmly! Give the drop-off address. Mention they can come by anytime.
+4. For MONEY DONATIONS: Thank them! Share Venmo and CashApp links. Mention it's tax-deductible (EIN: 39-2743613).
+5. For STRAY/SURRENDER/FOUND ANIMAL reports: Ask them to call ${SANCTUARY_INFO.phone} directly since intake depends on capacity. For emergencies, also give Animal Control number.
+6. For ADOPTION inquiries: Share the website and application link. Mention the $100 adoption fee (half off!). Encourage visiting.
+7. For BOARDING: Direct them to call/text to arrange. You CANNOT confirm availability or book.
+8. For MEDICAL QUESTIONS about adopted/fostered animals: Express concern and suggest calling the sanctuary or a vet. Don't give medical advice.
+9. When someone says they SENT money or DROPPED OFF supplies: Thank them enthusiastically! Their support saves lives.
+10. For LOGISTICS ("are you there", "what time", "we are outside"): Let them know to call/text ${SANCTUARY_INFO.phone} for real-time coordination.
+11. If the message is just an IMAGE with no text: Respond with something like "Thanks for sharing that! If you need help with something, just let me know 🐾"
+12. Keep responses under 300 characters when possible. Messenger is a chat, not email.
+13. NEVER say you are an AI. You are "the team" or "we" at The Barking Lot.`;
 
-  // Volunteer
-  if (/volunteer|help out|pitch in/.test(lower)) {
-    return {
-      text: `🙌 We love our volunteers! There are many ways to help:\n\n• Dog walking & socialization\n• Cleaning kennels\n• Event support\n• Transport runs\n• Building & maintenance\n• Photography\n• Social media\n\nEmail us at ${SANCTUARY_INFO.email} or call ${SANCTUARY_INFO.phone} to get started!\n\nOr just stop by during our hours — we can always use extra hands!`,
-      quickReplies: ["Hours & Location", "Donate", "Events"],
-    };
-  }
-
-  // Hours & Location
-  if (/hour|open|close|location|address|where|directions|visit/.test(lower)) {
-    return {
-      text: `📍 The Barking Lot\n${SANCTUARY_INFO.address}\n\n🕐 Hours:\n${SANCTUARY_INFO.hours}\n\n📞 ${SANCTUARY_INFO.phone}\n📧 ${SANCTUARY_INFO.email}\n🌐 ${SANCTUARY_INFO.website}\n\nCome visit — the animals would love to meet you! 🐾`,
-      quickReplies: ["Available Animals", "Donate", "Volunteer"],
-    };
-  }
-
-  // Supplies needed
-  if (/need|supplies|wishlist|what.*need|most needed/.test(lower)) {
-    return {
-      text: `Right now we could really use:\n\n🐶 Puppy & dog food\n🐱 Kitten formula & cat food\n🏕 Mesh tarps for shade\n🏠 Dog houses\n🧹 Cleaning supplies\n🛏 Blankets and towels\n💊 Flea/tick prevention\n\nDrop off at: ${SANCTUARY_INFO.address}\nOr order from our wishlist and ship directly to us!\n\n💸 Cash donations: ${SANCTUARY_INFO.venmo}`,
-      quickReplies: ["Donate", "Hours & Location", "Volunteer"],
-    };
-  }
-
-  // Report animal / emergency
-  if (/report|stray|found|lost|emergency|cruelty|abuse|neglect|injured/.test(lower)) {
-    return {
-      text: `🚨 Thank you for reaching out about an animal in need.\n\nFor emergencies or to report animal cruelty:\n📞 Call us: ${SANCTUARY_INFO.phone}\n📞 Big Spring Animal Control: (432) 264-2372\n\nIf you've found a stray or lost pet:\n• Take a photo and note the location\n• Check for a collar/tag\n• Contact us with the details\n\nWe'll do everything we can to help. 🐾`,
-      quickReplies: ["Hours & Location", "How to Adopt"],
-    };
-  }
-
-  // Events
-  if (/event|fundrais|adoption.*event|meet.*greet/.test(lower)) {
-    return {
-      text: `🎉 We host adoption events, fundraisers, and community gatherings throughout the year!\n\nFollow our Facebook page for the latest events:\nhttps://www.facebook.com/105558179275338\n\nOr check our website: ${SANCTUARY_INFO.website}\n\nWant to help organize an event? Email ${SANCTUARY_INFO.email}!`,
-      quickReplies: ["Available Animals", "Donate", "Volunteer"],
-    };
-  }
-
-  // Application
-  if (/application|apply|form/.test(lower)) {
-    return {
-      text: `📋 Here's our adoption/foster application:\n${SANCTUARY_INFO.applicationUrl}\n\nFill it out and we'll review it promptly! You can also email ${SANCTUARY_INFO.adoptEmail} with any questions.`,
-      quickReplies: ["Available Animals", "Hours & Location"],
-    };
-  }
-
-  // Thank you
-  if (/thank|thanks|appreciate/.test(lower)) {
-    return {
-      text: `You're so welcome! 🐾💛 Thank you for caring about our animals. If you need anything else, just message us anytime!\n\nRemember — sharing our posts helps save lives too! 🙌`,
-    };
-  }
-
-  // Default
-  return {
-    text: `Thanks for your message! 🐾\n\nI can help with:\n• 🐶 Available animals for adoption\n• 📋 Adoption/foster applications\n• 💛 How to donate\n• 🙌 Volunteering\n• 📍 Hours & location\n• 🚨 Reporting strays or emergencies\n\nJust ask, or tap one of the options below!`,
-    quickReplies: ["Available Animals", "How to Adopt", "Donate", "Hours & Location", "Volunteer", "Report Animal"],
-  };
+// Get conversation history from KV for context
+async function getConversationHistory(senderId: string, env: Env): Promise<Array<{ role: string; content: string }>> {
+  const key = `conv_${senderId}`;
+  const cached = await env.CACHE.get(key, "json") as Array<{ role: string; content: string }> | null;
+  return cached || [];
 }
 
-async function sendMessengerResponse(recipientId: string, responseData: { text?: string; quickReplies?: string[] }, env: Env) {
-  const messagePayload: Record<string, unknown> = {};
+async function saveConversationHistory(senderId: string, history: Array<{ role: string; content: string }>, env: Env) {
+  // Keep only last 10 messages for context
+  const trimmed = history.slice(-10);
+  await env.CACHE.put(`conv_${senderId}`, JSON.stringify(trimmed), { expirationTtl: 86400 });
+}
 
-  if (responseData.text) {
-    messagePayload.text = responseData.text;
+async function generateAIResponse(userMessage: string, senderId: string, env: Env): Promise<string> {
+  try {
+    // Get conversation history for context
+    const history = await getConversationHistory(senderId, env);
+
+    // Build messages array
+    const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
+      { role: "system", content: AI_SYSTEM_PROMPT },
+      ...history.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
+      { role: "user", content: userMessage },
+    ];
+
+    // Call Workers AI
+    const response = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
+      messages,
+      max_tokens: 300,
+      temperature: 0.7,
+    }) as { response?: string };
+
+    const aiText = response?.response || "";
+
+    // Save to conversation history
+    history.push({ role: "user", content: userMessage });
+    history.push({ role: "assistant", content: aiText });
+    await saveConversationHistory(senderId, history, env);
+
+    return aiText;
+  } catch (err) {
+    console.error(`AI response error: ${err instanceof Error ? err.message : "Unknown"}`);
+    // Fallback to basic response
+    return fallbackResponse(userMessage);
   }
+}
 
-  if (responseData.quickReplies && responseData.quickReplies.length > 0) {
-    messagePayload.quick_replies = responseData.quickReplies.map((title) => ({
-      content_type: "text",
-      title: title.substring(0, 20),
-      payload: title.toUpperCase().replace(/\s+/g, "_"),
-    }));
+function fallbackResponse(text: string): string {
+  const lower = text.toLowerCase();
+  if (/groom|bath|deshed|haircut|trim/.test(lower)) {
+    return `We do offer grooming! 🐾 Call or text Jhettlyn at (480) 843-4452 to schedule an appointment!`;
   }
+  if (/adopt|puppy|puppies|kitten|dog|cat|available/.test(lower)) {
+    return `Check out our available animals at ${SANCTUARY_INFO.website}/adopt 🐾 Adoption fee is ${SANCTUARY_INFO.adoptionFee}. Apply here: ${SANCTUARY_INFO.applicationUrl}`;
+  }
+  if (/donat|money|sent.*\$|venmo|cashapp|give/.test(lower)) {
+    return `Thank you so much! 💛 Venmo: ${SANCTUARY_INFO.venmo} | CashApp: ${SANCTUARY_INFO.cashapp} — Every dollar saves lives! EIN: ${SANCTUARY_INFO.ein}`;
+  }
+  if (/food|blanket|supplies|drop.?off|bring|tractor supply|walmart/.test(lower)) {
+    return `That would be amazing! 🙏 You can drop off at ${SANCTUARY_INFO.address}. We're always here! Thank you so much!`;
+  }
+  if (/stray|found|surrender|rehome|take.*dog|take.*cat|room/.test(lower)) {
+    return `Please call us at ${SANCTUARY_INFO.phone} about intake — it depends on our current capacity. For emergencies: Animal Control at ${SANCTUARY_INFO.animalControl}`;
+  }
+  if (/board|kennel|watch.*dog|drop.*off/.test(lower)) {
+    return `We do offer boarding! 🐾 Call or text ${SANCTUARY_INFO.phone} to arrange drop-off and pickup times.`;
+  }
+  if (/hour|open|where|address|location|direction/.test(lower)) {
+    return `📍 ${SANCTUARY_INFO.address}\n📞 ${SANCTUARY_INFO.phone}\n🌐 ${SANCTUARY_INFO.website}\nWe're always open — just call ahead!`;
+  }
+  if (/how much|charge|price|cost|fee/.test(lower)) {
+    return `Adoption fee is ${SANCTUARY_INFO.adoptionFee}. For grooming prices, call/text Jhettlyn at (480) 843-4452. We're happy to help! 🐾`;
+  }
+  if (/thank|thanks|appreciate/.test(lower)) {
+    return `You're so welcome! 💛 Thank you for supporting our animals. Sharing our posts helps save lives too! 🐾`;
+  }
+  return `Hey there! 🐾 Thanks for reaching out to The Barking Lot! For the quickest response, call or text us at ${SANCTUARY_INFO.phone}. We're here to help with adoptions, donations, grooming, boarding, and more!`;
+}
 
+async function sendMessengerText(recipientId: string, text: string, env: Env) {
   const body = {
     recipient: { id: recipientId },
-    message: messagePayload,
+    message: { text },
     messaging_type: "RESPONSE",
   };
 
@@ -359,12 +371,13 @@ async function handleMessengerWebhook(request: Request, env: Env): Promise<Respo
       } else if (event.postback?.payload) {
         userText = event.postback.payload.replace(/_/g, " ").toLowerCase();
       } else if (event.message?.attachments) {
-        userText = "image";
+        userText = "[User sent an image/attachment]";
       }
 
       if (userText) {
-        const response = generateBotResponse(userText);
-        await sendMessengerResponse(senderId, response, env);
+        // Use AI to generate response with conversation history
+        const aiResponse = await generateAIResponse(userText, senderId, env);
+        await sendMessengerText(senderId, aiResponse, env);
       }
     }
   }
