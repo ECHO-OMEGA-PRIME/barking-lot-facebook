@@ -97,7 +97,7 @@ async function fetchPageInfo(env: Env) {
 // ─── Cached endpoints ───────────────────────────────────────────
 async function getPosts(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
-  const limit = Math.min(parseInt(url.searchParams.get("limit") || "25"), 100);
+  const limit = Math.min(parseInt(url.searchParams.get("limit") || "25"), 25);
   const forceRefresh = url.searchParams.get("refresh") === "true";
   const cacheKey = `fb_posts_${limit}`;
 
@@ -436,6 +436,116 @@ function getWidgetScript(env: Env): string {
 })();`;
 }
 
+// ─── Image proxy (avoids FB CDN token expiration) ───────────────
+async function proxyImage(request: Request, env: Env, imageUrl: string): Promise<Response> {
+  // Check KV cache first
+  const cacheKey = `img_${btoa(imageUrl).substring(0, 100)}`;
+  const cached = await env.CACHE.get(cacheKey, "arrayBuffer");
+  if (cached) {
+    return new Response(cached, {
+      headers: {
+        "Content-Type": "image/jpeg",
+        "Cache-Control": "public, max-age=86400",
+        ...corsHeaders(request, env),
+      },
+    });
+  }
+
+  // Fetch from Facebook
+  const res = await fetch(imageUrl);
+  if (!res.ok) {
+    return new Response("Image not found", { status: 404, headers: corsHeaders(request, env) });
+  }
+
+  const imageData = await res.arrayBuffer();
+
+  // Cache for 24h (25MB KV limit, images are <500KB each)
+  await env.CACHE.put(cacheKey, imageData, { expirationTtl: 86400 });
+
+  return new Response(imageData, {
+    headers: {
+      "Content-Type": res.headers.get("Content-Type") || "image/jpeg",
+      "Cache-Control": "public, max-age=86400",
+      ...corsHeaders(request, env),
+    },
+  });
+}
+
+// ─── Website animals endpoint (full data for adopt page) ────────
+async function getWebsiteAnimals(request: Request, env: Env): Promise<Response> {
+  const cacheKey = "website_animals_v2";
+  const cached = await env.CACHE.get(cacheKey, "json");
+  if (cached) return json({ animals: cached, cached: true, count: (cached as unknown[]).length }, 200, request, env);
+
+  try {
+    const posts = await fetchFacebookPosts(env, 25, true);
+    const animals = extractWebsiteAnimals(posts, env);
+    await env.CACHE.put(cacheKey, JSON.stringify(animals), { expirationTtl: 86400 });
+    return json({ animals, cached: false, count: animals.length }, 200, request, env);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    return json({ error: message, animals: [] }, 500, request, env);
+  }
+}
+
+function extractWebsiteAnimals(posts: FacebookPost[], env: Env): Array<Record<string, unknown>> {
+  const adoptionKeywords = ["adopt", "foster", "forever home", "looking for", "available", "needs a home", "meet ", "rescue"];
+  const dogKeywords = ["dog", "puppy", "pup", "collie", "pit", "lab", "shepherd", "terrier", "hound", "retriever", "mix", "mama"];
+  const catKeywords = ["cat", "kitten", "kitty", "feline"];
+  const urgentKeywords = ["urgent", "emergency", "critically", "barely alive", "skin and bones", "mange", "emaciated", "needs surgery"];
+
+  const workerUrl = "https://barking-lot-facebook.bmcii1976.workers.dev";
+
+  return posts
+    .filter((p) => {
+      const msg = (p.message || "").toLowerCase();
+      return (p.message && p.full_picture) && (adoptionKeywords.some((kw) => msg.includes(kw)) || dogKeywords.some((kw) => msg.includes(kw)) || catKeywords.some((kw) => msg.includes(kw)));
+    })
+    .map((post) => {
+      const msg = (post.message || "").toLowerCase();
+      const nameMatch = (post.message || "").match(/(?:Meet|Introducing|This is|Say hello to)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)/);
+      const isDog = dogKeywords.some((kw) => msg.includes(kw));
+      const isCat = catKeywords.some((kw) => msg.includes(kw));
+      const isUrgent = urgentKeywords.some((kw) => msg.includes(kw));
+
+      // Generate a stable ID from the post ID
+      const postIdShort = post.id.split("_")[1] || post.id;
+      const species = isDog ? "dog" : isCat ? "cat" : "dog";
+      const name = nameMatch ? nameMatch[1] : (isDog ? "Rescue Dog" : isCat ? "Rescue Cat" : "Rescue Animal");
+
+      // Image URL proxied through Worker
+      const imageProxyUrl = post.full_picture
+        ? `${workerUrl}/api/image-proxy?url=${encodeURIComponent(post.full_picture)}`
+        : null;
+
+      return {
+        id: `${species}-${postIdShort}`,
+        name,
+        species,
+        breed: "Mixed Breed",
+        age: isCat ? "Unknown" : "Unknown",
+        gender: "Unknown",
+        size: "Medium",
+        weight: "Unknown",
+        color: "Various",
+        description: (post.message || "").substring(0, 1000),
+        personality: isUrgent ? ["Needs help", "Resilient"] : ["Sweet", "Loving"],
+        medical_notes: isUrgent ? "Needs medical attention - see description" : "",
+        photo_url: imageProxyUrl,
+        gallery: [],
+        status: "available",
+        featured: !!nameMatch,
+        urgent: isUrgent,
+        urgent_reason: isUrgent ? "Medical care needed - see description" : undefined,
+        adoption_fee: 0,
+        date_intake: post.created_time.split("T")[0],
+        date_posted: post.created_time.split("T")[0],
+        facebook_post_url: post.permalink_url || `https://facebook.com/${post.id}`,
+        foster_info: null,
+      };
+    });
+}
+
 // ─── Router ─────────────────────────────────────────────────────
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -463,6 +573,18 @@ export default {
         return getAnimals(request, env);
       }
 
+      // Website-ready animal data (full format for adopt page)
+      if (path === "/api/website-animals" && request.method === "GET") {
+        return getWebsiteAnimals(request, env);
+      }
+
+      // Image proxy (serves FB images through Worker to avoid CDN expiration)
+      if (path === "/api/image-proxy" && request.method === "GET") {
+        const imageUrl = url.searchParams.get("url");
+        if (!imageUrl) return json({ error: "Missing url parameter" }, 400, request, env);
+        return proxyImage(request, env, imageUrl);
+      }
+
       // Embeddable widget script
       if (path === "/widget.js") {
         return new Response(getWidgetScript(env), {
@@ -488,7 +610,8 @@ export default {
             service: "barking-lot-facebook",
             version: "1.0.0",
             timestamp: new Date().toISOString(),
-            endpoints: ["/api/posts", "/api/page", "/api/animals", "/widget.js", "/webhook"],
+            endpoints: ["/api/posts", "/api/page", "/api/animals", "/api/website-animals", "/api/image-proxy", "/widget.js", "/webhook"],
+            cron: "Daily at 6:00 UTC",
           },
           200,
           request,
@@ -524,6 +647,52 @@ export default {
       const message = err instanceof Error ? err.message : "Internal server error";
       console.error(`Error: ${message}`);
       return json({ error: message }, 500, request, env);
+    }
+  },
+
+  // ─── Daily cron: refresh posts + animals cache ─────────────────
+  async scheduled(_event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
+    console.log("Cron: Refreshing Facebook data...");
+    try {
+      // Refresh posts cache
+      const posts = await fetchFacebookPosts(env, 25);
+      const filtered = posts.filter((p) => p.message || p.full_picture);
+      await env.CACHE.put("fb_posts_25", JSON.stringify(filtered), { expirationTtl: 86400 });
+      console.log(`Cron: Cached ${filtered.length} posts`);
+
+      // Refresh animals cache
+      const animals = extractAnimalPosts(posts);
+      await env.CACHE.put("fb_animals", JSON.stringify(animals), { expirationTtl: 86400 });
+      console.log(`Cron: Cached ${animals.length} animals`);
+
+      // Refresh website animals
+      const postsWithAttachments = await fetchFacebookPosts(env, 25, true);
+      const websiteAnimals = extractWebsiteAnimals(postsWithAttachments, env);
+      await env.CACHE.put("website_animals_v2", JSON.stringify(websiteAnimals), { expirationTtl: 86400 });
+      console.log(`Cron: Cached ${websiteAnimals.length} website animals`);
+
+      // Pre-cache images via proxy
+      for (const post of filtered) {
+        if (post.full_picture) {
+          try {
+            const cacheKey = `img_${btoa(post.full_picture).substring(0, 100)}`;
+            const existing = await env.CACHE.get(cacheKey, "arrayBuffer");
+            if (!existing) {
+              const imgRes = await fetch(post.full_picture);
+              if (imgRes.ok) {
+                const imgData = await imgRes.arrayBuffer();
+                await env.CACHE.put(cacheKey, imgData, { expirationTtl: 86400 });
+              }
+            }
+          } catch (imgErr) {
+            console.error(`Cron: Failed to cache image: ${imgErr}`);
+          }
+        }
+      }
+      console.log("Cron: Image cache refresh complete");
+
+    } catch (err) {
+      console.error(`Cron error: ${err instanceof Error ? err.message : "Unknown"}`);
     }
   },
 };

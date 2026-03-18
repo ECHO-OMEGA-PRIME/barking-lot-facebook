@@ -12,6 +12,10 @@ ALLOWED_ORIGINS = "https://barkinglot.org,https://www.barkinglot.org,http://loca
 binding = "CACHE"
 id = "cc36208542224f3d827e7f1ee7e29885"
 
+# Daily cron to refresh Facebook data
+[triggers]
+crons = ["0 6 * * *"]
+
 # Secrets (set via wrangler secret put):
 # FB_PAGE_TOKEN - Facebook Page Access Token
 # FB_APP_SECRET - Facebook App Secret
