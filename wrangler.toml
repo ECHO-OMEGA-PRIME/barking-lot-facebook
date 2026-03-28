@@ -23,3 +23,7 @@ crons = ["0 6 * * *"]
 # FB_PAGE_TOKEN - Facebook Page Access Token
 # FB_APP_SECRET - Facebook App Secret
 # FB_VERIFY_TOKEN - Messenger webhook verify token
+
+[[analytics_engine_datasets]]
+binding = "ANALYTICS"
+dataset = "echo_metrics"
